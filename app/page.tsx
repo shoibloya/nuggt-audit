@@ -576,7 +576,7 @@ export default function HomePage() {
         )}
 
         <footer className="mt-12 text-center text-xs text-stone-500">
-          Professional palette: brown &amp; skin tones with black • © {new Date().getFullYear()} Nuggt
+          © {new Date().getFullYear()} Nuggt
         </footer>
       </div>
     </main>
