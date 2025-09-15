@@ -29,6 +29,9 @@ import {
   DataSnapshot,
 } from 'firebase/database';
 
+// NEW: Accounts lib (username -> password)
+import { accounts } from '@/lib/accounts';
+
 // Initialize Firebase (client)
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY!,
@@ -134,7 +137,7 @@ function LoginScreen({ onSuccess }: { onSuccess: (username: string) => void }) {
     }
     setLoading(true);
     // fixed credentials
-    const ok = username === 'verz' && password === 'fp0sjgej54';
+    const ok = Boolean(accounts[username] && accounts[username] === password);
     setTimeout(() => {
       setLoading(false);
       if (ok) {
@@ -237,7 +240,7 @@ export default function HomePage() {
       (snap: DataSnapshot) => {
         const val = snap.val() || {};
         const list: Profile[] = Object.entries(val)
-          .map(([id, p]: [string, any]) => ({ id, ...p }))
+          .map(([id, p]: [string, any]) => ({ ...p, id })) // preserve doc id even if DB also has an 'id' field
           .filter((p: any) => p.owner === authUser); // show only current user's profiles
         // Sort newest first
         list.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
@@ -333,7 +336,7 @@ export default function HomePage() {
 
       const node = push(ref(db, 'profiles'));
       const newId = node.key!;
-      await set(node, data);
+      await set(node, { ...data, id: authUser }); // NEW: also store username under 'id' in the DB
 
       // Kick off backend pipeline
       fetch(`/api/profiles/${newId}/bootstrap`, {
