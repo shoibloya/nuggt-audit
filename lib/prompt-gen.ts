@@ -55,10 +55,10 @@ function safeParse<T = any>(text: string): T {
 }
 
 const CAT_DEF: Record<PromptCategory, string> = {
-  brainstorming: "vague task/guidance exploration before a concrete problem is stated",
-  identified_problem: "the ICP has a clear pain stated and is seeking a solution",
-  solution_comparing: "comparing alternatives, head-to-head 'vs', pros/cons",
-  info_seeking: "neutral research about the product category and how it works",
+  brainstorming: "the ICP is asking about how to do something or is seeking guidance on something",
+  identified_problem: "the ICP clearly stated the problem and is seeking a solution",
+  solution_comparing: "head-to-head alternatives, best.., the ICP is comparing and trying to find the best solution in the profiles product category",
+  info_seeking: "the ICP is seeking information related to the product or the broader space",
 };
 
 export async function generatePromptsForProfile(profileId: string) {
@@ -89,7 +89,7 @@ export async function generatePromptsForProfile(profileId: string) {
     updatedAt: serverTimestamp(),
   });
 
-  const CONTEXT = scraped.slice(0, 120_000);
+  const CONTEXT = scraped; // DO NOT SLICE: pass the whole thing
 
   const instructions = [
     "You generate short, direct, human search-like prompts for chatbots.",
@@ -102,6 +102,7 @@ export async function generatePromptsForProfile(profileId: string) {
     //"Prefer verbs upfront (e.g., 'Compare...', 'How to...', 'Best...').",
     "Avoid brand mentions unless necessary.",
     "Focus on problems, tasks, and comparisons that align with the site's offerings.",
+    "You will be given short tail keywords (comma-separated). Each prompt MUST either include one of these short tail keywords verbatim OR be clearly about one of these keywords.",
   ].join("\n");
 
   const jsonShape = `{
@@ -113,15 +114,18 @@ export async function generatePromptsForProfile(profileId: string) {
 
   const input = [
     `Company: ${profile.companyName} (${profile.websiteUrl})`,
-    profile.remarks ? `Remarks: ${profile.remarks}` : "",
-    "Relevant site content (truncated):",
+    profile.remarks ? `Short tail keywords (comma-separated): ${profile.remarks}` : "",
+    "Relevant site content:",
     CONTEXT,
     "",
     "Generate 10 prompts in EACH category below. Keep each prompt short, simple, and natural. Identify the ICP put yourself in their shoes and write the prompts that the ICP will write in the tone that the ICP will write:",
     "- brainstorming = the ICP is asking about how to do something or is seeking guidance on something",
     "- identified_problem = the ICP clearly stated the problem and is seeking a solution",
-    "- solution_comparing = head-to-head alternatives, 'vs', pros/cons, best.., the ICP is comparing different solution in the profiles product category",
-    "- info_seeking = the ICP is seeking information related to the industry or the broader space",
+    "- solution_comparing = head-to-head alternatives, best.., the ICP is comparing and trying to find the best solution in the profiles product category",
+    "- info_seeking = the ICP is seeking information related to the product or the broader space",
+    "",
+    "Every prompt must include one of the short tail keywords above or be clearly about one of them.",
+    "If the site sells a comodity or is e-commerce then make sure all your prompts have a clear purchase intent (the user is directly looking for the product).",
     "",
     "Return ONLY raw JSON (no markdown fences, no prose) in this exact shape:",
     jsonShape,
@@ -217,19 +221,21 @@ export async function generateMorePromptsForCategory(
     "No fluff. No salutations. No hashtags. No emojis.",
     "Prefer verbs upfront.",
     "Avoid brand mentions unless necessary.",
+    "You will be given short tail keywords (comma-separated). Each prompt MUST either include one of these short tail keywords verbatim OR be clearly about one of these keywords.",
   ].join("\n");
 
   const jsonShape = `{"prompts": ["string", "... ${count} items total"]}`;
 
   const input = [
     `Company: ${profile.companyName} (${profile.websiteUrl})`,
-    remarks ? `Additional remarks: ${remarks}` : "",
+    remarks ? `Short tail keywords (comma-separated): ${remarks}` : "",
     `Category: ${category} — ${catDefinition}`,
     "",
     "Current prompts in this category:",
     ...existingList.map((p) => `- ${p}`),
     "",
     `Generate ${count} NEW prompts for this category that are distinct from the above.`,
+    "Every prompt must include one of the short tail keywords above or be clearly about one of them.",
     "Return ONLY raw JSON (no markdown fences, no prose) in this shape:",
     jsonShape,
   ].join("\n");

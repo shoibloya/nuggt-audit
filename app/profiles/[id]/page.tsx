@@ -43,6 +43,18 @@ type EngineResult = {
   top10?: string[];
   hasCompany?: boolean;
   competitorsHit?: string[];
+  // NEW: include immersive/shopping blocks written by backend (no other changes)
+  immersive?: {
+    hasCompany?: boolean;
+    brands?: string[];
+    competitorsHit?: string[];
+    sellers?: string[];
+  };
+  shopping?: {
+    hasCompany?: boolean;
+    competitorsHit?: string[];
+    sellers?: string[];
+  };
 };
 
 type PromptResult = {
@@ -193,6 +205,37 @@ function iconFor(name?: string) {
     case "file": return <FileText className="h-5 w-5" />;
     default: return <FileText className="h-5 w-5" />;
   }
+}
+
+// ===== Utility (client) to mirror backend logic for UI rendering =====
+function hostnameFromUrl(u?: string): string | null {
+  if (!u || typeof u !== 'string') return null;
+  try {
+    const h = new URL(u).hostname.toLowerCase();
+    return h.startsWith('www.') ? h.slice(4) : h;
+  } catch {
+    const cleaned = u.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '');
+    return cleaned.split('/')[0] || null;
+  }
+}
+function matchesDomain(host: string | null, domain?: string | null) {
+  if (!host || !domain) return false;
+  if (host === domain) return true;
+  return host.endsWith('.' + domain);
+}
+function normalizeBrand(s?: string) {
+  return (s || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+function brandMatchesDomain(brand?: string, domain?: string) {
+  if (!brand || !domain) return false;
+  const b = normalizeBrand(brand).replace(/\s+/g, ''); // "vera bradley" -> "verabradley"
+  const d = (domain || '').toLowerCase();
+  return b.length > 1 && d.includes(b);
 }
 
 // ====== Lightweight SVG charts (no extra deps) ======
@@ -661,6 +704,13 @@ export default function ProfileDashboard() {
     info_seeking: { weight: 0.9, reason: 'Foundational education solidifies authority and supports other intents.' },
   };
 
+  // ===== Derived company & competitor domains for UI checks =====
+  const companyDomain = React.useMemo(() => hostnameFromUrl(profile?.websiteUrl || '') || undefined, [profile?.websiteUrl]);
+  const competitorDomains = React.useMemo(
+    () => (profile?.competitorUrls || []).map(u => hostnameFromUrl(u || '')).filter(Boolean) as string[],
+    [profile?.competitorUrls]
+  );
+
   return (
     <main className="min-h-screen bg-gradient-to-b from-amber-50 to-stone-100">
       <div className="mx-auto max-w-6xl px-4 py-6">
@@ -690,7 +740,7 @@ export default function ProfileDashboard() {
                 <TabsTrigger value="report">Report</TabsTrigger>
               </TabsList>
 
-              {/* ======================= PROMPTS TAB (unchanged) ======================= */}
+              {/* ======================= PROMPTS TAB (with details popover) ======================= */}
               <TabsContent value="prompts" className="space-y-4">
                 {/* Category toolbar */}
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -737,10 +787,11 @@ export default function ProfileDashboard() {
                 ) : (
                   <div className="rounded-xl border border-stone-300 bg-white">
                     <div className="grid grid-cols-12 gap-0 border-b border-stone-200 bg-stone-50 px-3 py-2 text-xs font-semibold text-stone-700">
-                      <div className="col-span-7">Prompt</div>
+                      <div className="col-span-6">Prompt</div>
                       <div className="col-span-1 text-center">ChatGPT</div>
                       <div className="col-span-1 text-center">Perplexity</div>
                       <div className="col-span-1 text-center">Google AIO</div>
+                      <div className="col-span-1 text-center">Details</div>
                       <div className="col-span-2 text-center">Competitors</div>
                     </div>
 
@@ -756,6 +807,31 @@ export default function ProfileDashboard() {
 
                         const isNew = highlightIds.has(p.id);
 
+                        // Google ok = organic OR immersive brand-based match
+                        const gOk = (g?.hasCompany === true) || (g?.immersive?.hasCompany === true);
+
+                        // ========= Build Details (URLs & Brands) =========
+                        const gUrls = (g?.top10 || []).map(u => ({ url: u, host: hostnameFromUrl(u) }));
+                        const bUrls = (b?.top10 || []).map(u => ({ url: u, host: hostnameFromUrl(u) }));
+
+                        const brandList = (g?.immersive?.brands || []);
+                        const companyMatchesBrand = (brand: string) => brandMatchesDomain(brand, companyDomain);
+                        const competitorBrandHits = (brand: string) =>
+                          competitorDomains.filter(cd => brandMatchesDomain(brand, cd));
+
+                        const urlChip = (host: string | null) => {
+                          const isYou = matchesDomain(host, companyDomain || null);
+                          const comp = competitorDomains.find(cd => matchesDomain(host, cd));
+                          return (
+                            <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs mr-1 mb-1
+                              border-stone-200 bg-stone-50 text-stone-700">
+                              {host || '—'}
+                              {isYou ? <span className="text-emerald-600">✔</span> : null}
+                              {!isYou && comp ? <Badge className="bg-stone-200 text-stone-900">comp</Badge> : null}
+                            </span>
+                          );
+                        };
+
                         return (
                           <div
                             key={p.id}
@@ -764,7 +840,7 @@ export default function ProfileDashboard() {
                               (isNew ? "bg-amber-50/70" : "bg-white")
                             }
                           >
-                            <div className="col-span-7 pr-3 text-stone-900">
+                            <div className="col-span-6 pr-3 text-stone-900">
                               <span className={isNew ? "font-medium" : ""}>{p.text}</span>
                             </div>
 
@@ -775,12 +851,134 @@ export default function ProfileDashboard() {
                               <EngineCell status={b?.status} ok={b?.hasCompany} />
                             </div>
                             <div className="col-span-1 flex justify-center">
-                              <EngineCell status={g?.status} ok={g?.hasCompany} />
+                              <EngineCell status={g?.status} ok={gOk} />
                             </div>
                             <div className="col-span-1 flex justify-center">
-                              <EngineCell status={g?.status} ok={g?.hasCompany} />
+                              <EngineCell status={g?.status} ok={gOk} />
                             </div>
 
+                          
+                           {/* ===== DETAILS POPOVER (scrollable + compact brands like URLs) ===== */}
+<div className="col-span-1 flex items-center justify-center">
+  <Popover>
+    <PopoverTrigger asChild>
+      <Button variant="outline" size="sm" className="h-7 px-2">
+        <Info className="h-4 w-4 mr-1" />
+        Details
+      </Button>
+    </PopoverTrigger>
+
+    {/* Force the popover body itself to scroll */}
+    {/* Replace only the <PopoverContent>…</PopoverContent> block inside the Details popover with this */}
+<PopoverContent className="w-[560px] max-h-[70vh] overflow-auto p-4">
+  {(() => {
+    // local helpers
+    const hostnameFromUrl = (u: string) => {
+      try {
+        const h = new URL(u).hostname.toLowerCase();
+        return h.startsWith('www.') ? h.slice(4) : h;
+      } catch {
+        const cleaned = u.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '');
+        return cleaned.split('/')[0];
+      }
+    };
+    const normalizeBrand = (s: string) =>
+      (s || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+    const brandMatchesDomain = (brand: string, domain: string) => {
+      if (!brand || !domain) return false;
+      const b = normalizeBrand(brand).replace(/\s+/g, '');
+      const d = String(domain || '').toLowerCase();
+      return b.length > 1 && d.includes(b);
+    };
+
+    const companyDomain = hostnameFromUrl(profile?.websiteUrl || '');
+    const competitorDomains = (profile?.competitorUrls || []).map(hostnameFromUrl);
+
+    const chip = (
+      label: string,
+      kind: 'you' | 'comp' | 'other' = 'other',
+      href?: string
+    ) => {
+      const base =
+        kind === 'you'
+          ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+          : kind === 'comp'
+          ? 'bg-amber-100 text-amber-900 border border-amber-300'
+          : 'bg-stone-100 text-stone-800 border border-stone-300';
+      const node = (
+        <span className={`mr-1.5 mb-1.5 inline-flex items-center rounded px-2 py-0.5 text-xs ${base}`}>
+          {label}
+        </span>
+      );
+      return href ? (
+        <a key={href} href={href} target="_blank" rel="noreferrer" className="no-underline">
+          {node}
+        </a>
+      ) : (
+        <span key={label}>{node}</span>
+      );
+    };
+
+    const gTop10 = g?.top10 || [];
+    const brands: string[] = g?.immersive?.brands || [];
+
+    return (
+      <div className="space-y-4">
+        {/* Top 10 Citations (URLs) */}
+        <div>
+          <div className="text-xs font-medium text-stone-700 mb-1">Top 10 Citations</div>
+          <div className="flex flex-wrap">
+            {gTop10.length ? (
+              gTop10.map((url: string) => {
+                const host = hostnameFromUrl(url);
+                const kind: 'you' | 'comp' | 'other' =
+                  host === companyDomain || host.endsWith('.' + companyDomain)
+                    ? 'you'
+                    : competitorDomains.some((cd) => host === cd || host.endsWith('.' + cd))
+                    ? 'comp'
+                    : 'other';
+                return chip(host, kind, url);
+              })
+            ) : (
+              <span className="text-sm text-stone-500">No results.</span>
+            )}
+          </div>
+        </div>
+
+        <Separator />
+
+        {/* Products mentioned (brands) */}
+        <div>
+          <div className="text-xs font-medium text-stone-700 mb-1">Products mentioned</div>
+          <div className="flex flex-wrap">
+            {brands.length ? (
+              brands.map((brand) => {
+                const you = brandMatchesDomain(brand, companyDomain);
+                const comp = competitorDomains.some((cd) => brandMatchesDomain(brand, cd));
+                const kind: 'you' | 'comp' | 'other' = you ? 'you' : comp ? 'comp' : 'other';
+                return chip(brand, kind);
+              })
+            ) : (
+              <span className="text-sm text-stone-500">No products captured.</span>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  })()}
+</PopoverContent>
+
+  </Popover>
+</div>
+
+
+
+                            {/* Competitor count popover (existing) */}
                             <div className="col-span-2 flex items-center justify-center">
                               {competitorCount > 0 ? (
                                 <Popover>
@@ -1058,7 +1256,7 @@ export default function ProfileDashboard() {
               <span className="text-xs font-semibold uppercase tracking-wide text-amber-700">
                 Why this weight
               </span>
-              <Badge className="bg-amber-100 text-amber-800 border border-amber-200">
+              <Badge className="bg-amber-100 text-amber-800 border-amber-200 border">
                 {weight.toFixed(1)}
               </Badge>
             </div>

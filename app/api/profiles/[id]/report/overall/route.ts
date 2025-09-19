@@ -234,6 +234,30 @@ function outlineFor(category: PromptCategory, promptText: string) {
   }
 }
 
+// ===== Added helpers for brand→domain matching (do not change anything else) =====
+const hostnameFromUrl = (u?: string) => {
+  if (!u) return "";
+  try {
+    const h = new URL(u).hostname.toLowerCase();
+    return h.startsWith("www.") ? h.slice(4) : h;
+  } catch {
+    return String(u).toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0];
+  }
+};
+const normalizeBrand = (s: string) =>
+  (s || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+const brandMatchesDomain = (brand?: string, domain?: string) => {
+  if (!brand || !domain) return false;
+  const b = normalizeBrand(brand).replace(/\s+/g, ""); // "vera bradley" -> "verabradley"
+  const d = (domain || "").toLowerCase();
+  return b.length > 1 && d.includes(b); // brand string is contained in domain
+};
+
 // ---------- Route ----------
 export async function POST(
   _req: NextRequest,
@@ -292,17 +316,33 @@ export async function POST(
 
     const computed: Computed[] = [];
 
+    // ===== Added: derive normalized domains once (before loop) =====
+    const companyDomain = hostnameFromUrl(profile.websiteUrl);
+    const competitorDomainList = (profile.competitorUrls || [])
+      .map(hostnameFromUrl)
+      .filter(Boolean) as string[];
+
     for (const p of prompts) {
       const r = resultsVal?.[p.id] || {};
       const g = r.google || {};
       const b = r.bing || {};
 
-      const googleHas = !!g.hasCompany;
+      const googleHas =
+  !!g.hasCompany ||
+  !!(g as any).immersive?.hasCompany ||
+  (Array.isArray((g as any).immersive?.brands) &&
+    (g as any).immersive!.brands.some((br: string) => brandMatchesDomain(br, companyDomain)));
+
       const bingHas = !!b.hasCompany;
 
+      // ===== Replaced: competitor domains now include brand-driven hits from immersive
       const gHits = Array.isArray(g.competitorsHit) ? g.competitorsHit : [];
       const bHits = Array.isArray(b.competitorsHit) ? b.competitorsHit : [];
-      const competitorDomains = Array.from(new Set([...gHits, ...bHits]));
+      const brands = Array.isArray((g as any).immersive?.brands) ? ((g as any).immersive!.brands as string[]) : [];
+      const brandHitDomains = competitorDomainList.filter(cd =>
+        brands.some(br => brandMatchesDomain(br, cd))
+      );
+      const competitorDomains = Array.from(new Set([...gHits, ...bHits, ...brandHitDomains]));
       const competitorHitsCount = competitorDomains.length;
 
       const presenceScore = (googleHas ? 2 : 0) + (bingHas ? 1.2 : 0);

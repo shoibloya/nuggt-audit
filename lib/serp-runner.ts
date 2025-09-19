@@ -1,7 +1,19 @@
 // lib/serp-runner.ts
+
 import { initializeApp, getApps } from "firebase/app";
 import { getDatabase, ref, get, set, update, serverTimestamp, child } from "firebase/database";
-import { analyzeTop10, hostnameFromUrl, serpTop10 } from "./serp";
+import {
+  analyzeTop10,
+  hostnameFromUrl,
+  serpTop10,
+  serpSearchRaw,
+  extractOrganicTop10,
+  extractShoppingSellerHosts,
+  fetchImmersiveStoresAndBrands,
+  analyzePresence,
+  analyzeImmersiveByBrand,
+  SerpRegionKey,
+} from "./serp";
 
 // Firebase init (client SDK via env)
 if (!getApps().length) {
@@ -45,10 +57,12 @@ export async function runSerpChecksForProfile(profileId: string) {
   const profile = snap.val() as {
     websiteUrl: string;
     competitorUrls?: string[];
+    region?: SerpRegionKey;
   };
 
   const companyDomain = hostnameFromUrl(profile.websiteUrl);
   const competitorDomains = (profile.competitorUrls || []).map(hostnameFromUrl);
+  const region: SerpRegionKey = profile.region || "sg";
 
   // gather prompts
   const promptsSnap = await get(child(profileRef, "prompts"));
@@ -83,15 +97,71 @@ export async function runSerpChecksForProfile(profileId: string) {
   // Run with small concurrency
   await asyncPool(4, prompts, async (p) => {
     try {
-      // GOOGLE
+      // GOOGLE (enhanced: organic + shopping + immersive)
       try {
-        const gTop10 = await serpTop10(p.text);
-        const g = analyzeTop10(gTop10, companyDomain, competitorDomains);
+        // 1) Full SERP JSON (region-aware)
+        const gData = await serpSearchRaw(p.text, region);
+
+        // 2) Organic (legacy fields) — store ALL URLs (top10)
+        const gTop10 = extractOrganicTop10(gData);
+        const organic = analyzeTop10(gTop10, companyDomain, competitorDomains);
+
+        // Log search URLs & matched count (unchanged logic)
+        try {
+          console.log("[SERP][search][urls]", gTop10);
+          const searchMatches = gTop10.filter((u) => {
+            const h = hostnameFromUrl(u);
+            return h === companyDomain || h.endsWith("." + companyDomain);
+          }).length;
+          console.log("[SERP][search][matched-count]", { promptId: p.id, matchedCount: searchMatches });
+        } catch {}
+
+        // 3) Shopping sellers on main SERP (host-based, informational)
+        const shoppingHosts = extractShoppingSellerHosts(gData);
+        const shopping = analyzePresence([...shoppingHosts], companyDomain, competitorDomains);
+
+        // 4) Immersive Products → follow & collect (hosts + brands)
+        const { hosts: immersiveHosts, brands: immersiveBrands } = await fetchImmersiveStoresAndBrands(gData, region);
+
+        // Log all brands & matched count (brand→domain)
+        try {
+          const brandsArr = Array.from(immersiveBrands);
+          console.log("[SERP][immersive][brands][prompt]", { promptId: p.id, brands: brandsArr });
+          const brandMatchedCount = brandsArr.filter((b) => {
+            const normB = b && b.trim();
+            return normB ? companyDomain.toLowerCase().includes(
+              normB.toLowerCase()
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .replace(/[^a-z0-9]+/g, "")
+            ) : false;
+          }).length;
+          console.log("[SERP][immersive][brands-matched-count]", { promptId: p.id, matchedCount: brandMatchedCount });
+        } catch {}
+
+        // Immersive presence **by brand** (this drives the UI tick for immersive)
+        const immersive = analyzeImmersiveByBrand([...immersiveBrands], companyDomain, competitorDomains);
+
         await set(child(profileRef, `results/${p.id}/google`), {
           status: "done",
+          // legacy fields (organic-only) — UI shows ALL URLs
           top10: gTop10,
-          hasCompany: g.hasCompany,
-          competitorsHit: g.competitorsHit,
+          hasCompany: organic.hasCompany,
+          competitorsHit: organic.competitorsHit,
+          // new, additive blocks
+          shopping: {
+            sellers: [...shoppingHosts],
+            hasCompany: shopping.hasCompany,
+            competitorsHit: shopping.competitorsHit,
+          },
+          immersive: {
+            // keep sellers for visibility (not used for matching)
+            sellers: [...immersiveHosts],
+            // store brands and brand-based matching result
+            brands: Array.from(immersiveBrands),
+            hasCompany: immersive.hasCompany,           // BRAND-BASED (brand in company domain)
+            competitorsHit: immersive.competitorsHit,   // BRAND-BASED (brand in competitor domain)
+          },
           updatedAt: Date.now(),
         });
       } catch (e: any) {
@@ -102,9 +172,9 @@ export async function runSerpChecksForProfile(profileId: string) {
         });
       }
 
-      // BING
+      // BING (unchanged)
       try {
-        const bTop10 = await serpTop10(p.text, "bing");
+        const bTop10 = await serpTop10(p.text, "bing", region);
         const b = analyzeTop10(bTop10, companyDomain, competitorDomains);
         await set(child(profileRef, `results/${p.id}/bing`), {
           status: "done",
@@ -145,10 +215,12 @@ export async function runSerpForPrompt(profileId: string, promptId: string) {
   const profile = snap.val() as {
     websiteUrl: string;
     competitorUrls?: string[];
+    region?: SerpRegionKey;
   };
 
   const companyDomain = hostnameFromUrl(profile.websiteUrl);
   const competitorDomains = (profile.competitorUrls || []).map(hostnameFromUrl);
+  const region: SerpRegionKey = profile.region || "sg";
 
   // lookup prompt text
   const [category, key] = promptId.split(":");
@@ -162,15 +234,62 @@ export async function runSerpForPrompt(profileId: string, promptId: string) {
     bing: { status: "checking" },
   });
 
-  // GOOGLE
+  // GOOGLE (enhanced)
   try {
-    const gTop10 = await serpTop10(text);
-    const g = analyzeTop10(gTop10, companyDomain, competitorDomains);
+    const gData = await serpSearchRaw(text, region);
+
+    const gTop10 = extractOrganicTop10(gData);
+    const organic = analyzeTop10(gTop10, companyDomain, competitorDomains);
+
+    // Log search URLs & matched count (unchanged logic)
+    try {
+      console.log("[SERP][search][urls]", gTop10);
+      const searchMatches = gTop10.filter((u) => {
+        const h = hostnameFromUrl(u);
+        return h === companyDomain || h.endsWith("." + companyDomain);
+      }).length;
+      console.log("[SERP][search][matched-count]", { promptId, matchedCount: searchMatches });
+    } catch {}
+
+    const shoppingHosts = extractShoppingSellerHosts(gData);
+    const shopping = analyzePresence([...shoppingHosts], companyDomain, competitorDomains);
+
+    const { hosts: immersiveHosts, brands: immersiveBrands } = await fetchImmersiveStoresAndBrands(gData, region);
+
+    // Log all brands & matched count (brand→domain)
+    try {
+      const brandsArr = Array.from(immersiveBrands);
+      console.log("[SERP][immersive][brands][prompt]", { promptId, brands: brandsArr });
+      const brandMatchedCount = brandsArr.filter((b) => {
+        const normB = b && b.trim();
+        return normB ? companyDomain.toLowerCase().includes(
+          normB.toLowerCase()
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/[^a-z0-9]+/g, "")
+        ) : false;
+      }).length;
+      console.log("[SERP][immersive][brands-matched-count]", { promptId, matchedCount: brandMatchedCount });
+    } catch {}
+
+    const immersive = analyzeImmersiveByBrand([...immersiveBrands], companyDomain, competitorDomains);
+
     await set(child(profileRef, `results/${promptId}/google`), {
       status: "done",
-      top10: gTop10,
-      hasCompany: g.hasCompany,
-      competitorsHit: g.competitorsHit,
+      top10: gTop10, // legacy (ALL URLs for search)
+      hasCompany: organic.hasCompany,
+      competitorsHit: organic.competitorsHit,
+      shopping: {
+        sellers: [...shoppingHosts],
+        hasCompany: shopping.hasCompany,
+        competitorsHit: shopping.competitorsHit,
+      },
+      immersive: {
+        sellers: [...immersiveHosts],             // informational
+        brands: Array.from(immersiveBrands),      // authoritative for matching (UI shows ALL brands)
+        hasCompany: immersive.hasCompany,         // BRAND-BASED
+        competitorsHit: immersive.competitorsHit, // BRAND-BASED
+      },
       updatedAt: Date.now(),
     });
   } catch (e: any) {
@@ -181,9 +300,9 @@ export async function runSerpForPrompt(profileId: string, promptId: string) {
     });
   }
 
-  // BING
+  // BING (unchanged)
   try {
-    const bTop10 = await serpTop10(text, "bing");
+    const bTop10 = await serpTop10(text, "bing", region);
     const b = analyzeTop10(bTop10, companyDomain, competitorDomains);
     await set(child(profileRef, `results/${promptId}/bing`), {
       status: "done",

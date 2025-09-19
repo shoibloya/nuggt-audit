@@ -27,6 +27,7 @@ import {
   set,
   serverTimestamp,
   DataSnapshot,
+  remove, // <-- NEW: for deleting profiles
 } from 'firebase/database';
 
 // NEW: Accounts lib (username -> password)
@@ -67,6 +68,7 @@ type Profile = {
   progress: number; // 0-100
   createdAt: number | { '.sv': 'timestamp' };
   updatedAt: number | { '.sv': 'timestamp' };
+  region?: 'sg' | 'us';           // NEW: search region (default 'sg')
 };
 
 type Banner = { type: 'info' | 'success' | 'error'; message: string } | null;
@@ -225,11 +227,15 @@ export default function HomePage() {
   const [competitorInput, setCompetitorInput] = React.useState('');
   const [competitors, setCompetitors] = React.useState<string[]>([]);
   const [topicsInput, setTopicsInput] = React.useState(''); // NEW: comma-separated topics
+  const [region, setRegion] = React.useState<'sg' | 'us'>('sg'); // NEW: search region
 
   // Track a profile being created to show progress inline
   const [creatingProfileId, setCreatingProfileId] = React.useState<string | null>(null);
   const [creatingProgress, setCreatingProgress] = React.useState<number>(0);
   const [creatingStatus, setCreatingStatus] = React.useState<ProfileStatus>('creating');
+
+  // NEW: edit mode
+  const [editingProfileId, setEditingProfileId] = React.useState<string | null>(null);
 
   // Load profiles only after login
   React.useEffect(() => {
@@ -322,6 +328,48 @@ export default function HomePage() {
         .map((s) => s.trim())
         .filter(Boolean);
 
+      // EDIT MODE: update & regenerate
+      if (editingProfileId) {
+        const existing = profiles.find((pr) => pr.id === editingProfileId);
+        const nodeRef = ref(db, `profiles/${editingProfileId}`);
+        const updated: Omit<Profile, 'id'> & { id: string } = {
+          companyName: companyName.trim(),
+          websiteUrl: normalizedSite,
+          competitorUrls: competitors.map(normalizeUrl),
+          topics,
+          owner: authUser,
+          status: 'creating',
+          progress: 4,
+          createdAt: (existing?.createdAt as any) ?? (serverTimestamp() as any),
+          updatedAt: serverTimestamp() as any,
+          id: authUser, // keep same behavior as create
+          region, // NEW
+        };
+        await set(nodeRef, updated);
+
+        // Kick off backend pipeline again (regenerate)
+        fetch(`/api/profiles/${editingProfileId}/bootstrap`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ profileId: editingProfileId }),
+        }).catch(() => {});
+
+        setCreatingProfileId(editingProfileId);
+        setDialogOpen(false);
+        setEditingProfileId(null);
+
+        // Reset form
+        setCompanyName('');
+        setWebsiteUrl('');
+        setCompetitors([]);
+        setTopicsInput('');
+        setRegion('sg');
+
+        setBanner({ type: 'success', message: 'Profile updated. We restarted the audit pipeline.' });
+        return;
+      }
+
+      // CREATE MODE (unchanged except region)
       const data: Omit<Profile, 'id'> = {
         companyName: companyName.trim(),
         websiteUrl: normalizedSite,
@@ -332,6 +380,7 @@ export default function HomePage() {
         progress: 4,
         createdAt: serverTimestamp() as any,
         updatedAt: serverTimestamp() as any,
+        region, // NEW
       };
 
       const node = push(ref(db, 'profiles'));
@@ -353,11 +402,12 @@ export default function HomePage() {
       setWebsiteUrl('');
       setCompetitors([]);
       setTopicsInput('');
+      setRegion('sg');
 
       setBanner({ type: 'success', message: 'Profile created. We started the audit pipeline.' });
     } catch (err: any) {
       console.error(err);
-      setBanner({ type: 'error', message: `Failed to create profile: ${String(err)}` });
+      setBanner({ type: 'error', message: `Failed to ${editingProfileId ? 'update' : 'create'} profile: ${String(err)}` });
     } finally {
       setSaving(false);
     }
@@ -365,6 +415,36 @@ export default function HomePage() {
 
   function goToProfile(p: Profile) {
     router.push(`/profiles/${p.id}`);
+  }
+
+  // NEW: open edit dialog with pre-filled values
+  function handleEditProfile(p: Profile) {
+    setEditingProfileId(p.id);
+    setCompanyName(p.companyName || '');
+    setWebsiteUrl(p.websiteUrl || '');
+    setCompetitors(p.competitorUrls || []);
+    setTopicsInput((p.topics || []).join(', '));
+    setRegion((p.region as 'sg' | 'us') || 'sg'); // NEW
+    setDialogOpen(true);
+  }
+
+  // NEW: delete a profile
+  async function handleDeleteProfile(p: Profile) {
+    if (!authUser) {
+      setBanner({ type: 'error', message: 'Not signed in.' });
+      return;
+    }
+    const ok = typeof window !== 'undefined'
+      ? window.confirm(`Delete profile "${p.companyName}"? This cannot be undone.`)
+      : true;
+    if (!ok) return;
+    try {
+      await remove(ref(db, `profiles/${p.id}`));
+      setBanner({ type: 'success', message: 'Profile deleted.' });
+    } catch (err: any) {
+      console.error(err);
+      setBanner({ type: 'error', message: `Failed to delete profile: ${String(err)}` });
+    }
   }
 
   // ---------- Gate UI until logged in ----------
@@ -383,14 +463,25 @@ export default function HomePage() {
           </div>
           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
             <DialogTrigger asChild>
-              <Button className="bg-stone-950 text-amber-50 hover:bg-stone-800">
+              <Button
+                className="bg-stone-950 text-amber-50 hover:bg-stone-800"
+                onClick={() => {
+                  // ensure fresh form for "New Profile"
+                  setEditingProfileId(null);
+                  setCompanyName('');
+                  setWebsiteUrl('');
+                  setCompetitors([]);
+                  setTopicsInput('');
+                  setRegion('sg'); // NEW
+                }}
+              >
                 <Plus className="mr-2 h-4 w-4" />
                 New Profile
               </Button>
             </DialogTrigger>
             <DialogContent className="sm:max-w-xl">
               <DialogHeader>
-                <DialogTitle>Create Profile</DialogTitle>
+                <DialogTitle>{editingProfileId ? 'Edit Profile' : 'Create Profile'}</DialogTitle>
               </DialogHeader>
 
               <form onSubmit={handleCreateProfile} className="space-y-4">
@@ -481,8 +572,35 @@ export default function HomePage() {
                   />
                 </div>
 
+                {/* NEW: Region selector */}
+                <div className="grid gap-3">
+                  <Label htmlFor="region">Search region</Label>
+                  <select
+                    id="region"
+                    value={region}
+                    onChange={(e) => setRegion(e.target.value as 'sg' | 'us')}
+                    className="h-10 rounded-md border border-stone-300 bg-amber-50/60 px-3 text-stone-900"
+                  >
+                    <option value="sg">Singapore</option>
+                    <option value="us">United States</option>
+                  </select>
+                </div>
+
                 <DialogFooter className="gap-2">
-                  <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setDialogOpen(false);
+                      setEditingProfileId(null);
+                      // optional: clear form
+                      setCompanyName('');
+                      setWebsiteUrl('');
+                      setCompetitors([]);
+                      setTopicsInput('');
+                      setRegion('sg');
+                    }}
+                  >
                     Cancel
                   </Button>
                   <Button
@@ -491,7 +609,7 @@ export default function HomePage() {
                     disabled={saving || !canSubmit}
                   >
                     {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
-                    Create
+                    {editingProfileId ? 'Save' : 'Create'}
                   </Button>
                 </DialogFooter>
               </form>
@@ -572,6 +690,28 @@ export default function HomePage() {
                   >
                     Open dashboard →
                   </Link>
+
+                  {/* NEW: Edit & Delete buttons */}
+                  <div className="mt-2 flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleEditProfile(p);
+                      }}
+                    >
+                      Edit
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteProfile(p);
+                      }}
+                    >
+                      Delete
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             ))}
