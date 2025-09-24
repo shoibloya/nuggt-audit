@@ -447,6 +447,15 @@ export default function HomePage() {
     }
   }
 
+  // NEW: sign out
+  function handleSignOut() {
+    try {
+      localStorage.removeItem('authUser');
+    } catch {}
+    setAuthUser(null);
+    router.push('/');
+  }
+
   // ---------- Gate UI until logged in ----------
   if (!authUser) {
     return <LoginScreen onSuccess={(u) => setAuthUser(u)} />;
@@ -461,160 +470,168 @@ export default function HomePage() {
             <p className="text-sm text-stone-600">Audit prompts & discoverability for chat-first search.</p>
             <p className="mt-1 text-xs text-stone-500">Signed in as <span className="font-medium">{authUser}</span></p>
           </div>
-          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-            <DialogTrigger asChild>
-              <Button
-                className="bg-stone-950 text-amber-50 hover:bg-stone-800"
-                onClick={() => {
-                  // ensure fresh form for "New Profile"
-                  setEditingProfileId(null);
-                  setCompanyName('');
-                  setWebsiteUrl('');
-                  setCompetitors([]);
-                  setTopicsInput('');
-                  setRegion('sg'); // NEW
-                }}
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                New Profile
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-xl">
-              <DialogHeader>
-                <DialogTitle>{editingProfileId ? 'Edit Profile' : 'Create Profile'}</DialogTitle>
-              </DialogHeader>
 
-              <form onSubmit={handleCreateProfile} className="space-y-4">
-                <div className="grid gap-3">
-                  <Label htmlFor="companyName">Company Name</Label>
-                  <div className="relative">
-                    <Input
-                      id="companyName"
-                      placeholder="Acme Inc."
-                      value={companyName}
-                      onChange={(e) => setCompanyName(e.target.value)}
-                      className="bg-amber-50/60 border-stone-300 text-stone-900 placeholder:text-stone-400"
-                      required
-                    />
-                    <Building2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
-                  </div>
-                </div>
+          {/* Right-side controls: Sign out + New Profile */}
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={handleSignOut}>
+              Sign out
+            </Button>
 
-                <div className="grid gap-3">
-                  <Label htmlFor="websiteUrl">Company Website URL</Label>
-                  <div className="relative">
-                    <Input
-                      id="websiteUrl"
-                      placeholder="https://www.example.com"
-                      value={websiteUrl}
-                      onChange={(e) => setWebsiteUrl(e.target.value)}
-                      className="bg-amber-50/60 border-stone-300 text-stone-900 placeholder:text-stone-400"
-                      required
-                    />
-                    <Globe className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
-                  </div>
-                </div>
+            <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+              <DialogTrigger asChild>
+                <Button
+                  className="bg-stone-950 text-amber-50 hover:bg-stone-800"
+                  onClick={() => {
+                    // ensure fresh form for "New Profile"
+                    setEditingProfileId(null);
+                    setCompanyName('');
+                    setWebsiteUrl('');
+                    setCompetitors([]);
+                    setTopicsInput('');
+                    setRegion('sg'); // NEW
+                  }}
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  New Profile
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-xl">
+                <DialogHeader>
+                  <DialogTitle>{editingProfileId ? 'Edit Profile' : 'Create Profile'}</DialogTitle>
+                </DialogHeader>
 
-                <div className="grid gap-3">
-                  <Label>Competitor URLs (at least one)</Label>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      placeholder="https://competitor.com"
-                      value={competitorInput}
-                      onChange={(e) => setCompetitorInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ',') {
-                          e.preventDefault();
-                          addCompetitorFromInput();
-                        }
-                      }}
-                      className="bg-amber-50/60 border-stone-300 text-stone-900 placeholder:text-stone-400"
-                    />
-                    <Button type="button" variant="secondary" onClick={addCompetitorFromInput}>
-                      Add
-                    </Button>
-                  </div>
-                  {competitors.length > 0 && (
-                    <div className="flex flex-wrap gap-2">
-                      {competitors.map((c) => (
-                        <span
-                          key={c}
-                          className="inline-flex items-center gap-2 rounded-full bg-stone-200 px-3 py-1 text-sm text-stone-900"
-                        >
-                          {c}
-                          <button
-                            type="button"
-                            className="rounded-full border border-stone-400 px-2 text-xs text-stone-700 hover:bg-stone-300"
-                            onClick={() => removeCompetitor(c)}
-                            aria-label={`Remove ${c}`}
-                          >
-                            ×
-                          </button>
-                        </span>
-                      ))}
+                <form onSubmit={handleCreateProfile} className="space-y-4">
+                  <div className="grid gap-3">
+                    <Label htmlFor="companyName">Company Name</Label>
+                    <div className="relative">
+                      <Input
+                        id="companyName"
+                        placeholder="Acme Inc."
+                        value={companyName}
+                        onChange={(e) => setCompanyName(e.target.value)}
+                        className="bg-amber-50/60 border-stone-300 text-stone-900 placeholder:text-stone-400"
+                        required
+                      />
+                      <Building2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
                     </div>
-                  )}
-                  {competitors.length === 0 && (
-                    <div className="text-xs text-amber-700">Please add at least one competitor URL.</div>
-                  )}
-                </div>
+                  </div>
 
-                <div className="grid gap-3">
-                  <Label htmlFor="topics">Short-tail keywords / topics (comma-separated)</Label>
-                  <Textarea
-                    id="topics"
-                    rows={3}
-                    placeholder="e.g., ai scheduling, meeting assistant, calendar automation"
-                    value={topicsInput}
-                    onChange={(e) => setTopicsInput(e.target.value)}
-                    className="bg-amber-50/60 border-stone-300 text-stone-900 placeholder:text-stone-400"
-                    required
-                  />
-                </div>
+                  <div className="grid gap-3">
+                    <Label htmlFor="websiteUrl">Company Website URL</Label>
+                    <div className="relative">
+                      <Input
+                        id="websiteUrl"
+                        placeholder="https://www.example.com"
+                        value={websiteUrl}
+                        onChange={(e) => setWebsiteUrl(e.target.value)}
+                        className="bg-amber-50/60 border-stone-300 text-stone-900 placeholder:text-stone-400"
+                        required
+                      />
+                      <Globe className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
+                    </div>
+                  </div>
 
-                {/* NEW: Region selector */}
-                <div className="grid gap-3">
-                  <Label htmlFor="region">Search region</Label>
-                  <select
-                    id="region"
-                    value={region}
-                    onChange={(e) => setRegion(e.target.value as 'sg' | 'us')}
-                    className="h-10 rounded-md border border-stone-300 bg-amber-50/60 px-3 text-stone-900"
-                  >
-                    <option value="sg">Singapore</option>
-                    <option value="us">United States</option>
-                  </select>
-                </div>
+                  <div className="grid gap-3">
+                    <Label>Competitor URLs (at least one)</Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        placeholder="https://competitor.com"
+                        value={competitorInput}
+                        onChange={(e) => setCompetitorInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ',') {
+                            e.preventDefault();
+                            addCompetitorFromInput();
+                          }
+                        }}
+                        className="bg-amber-50/60 border-stone-300 text-stone-900 placeholder:text-stone-400"
+                      />
+                      <Button type="button" variant="secondary" onClick={addCompetitorFromInput}>
+                        Add
+                      </Button>
+                    </div>
+                    {competitors.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {competitors.map((c) => (
+                          <span
+                            key={c}
+                            className="inline-flex items-center gap-2 rounded-full bg-stone-200 px-3 py-1 text-sm text-stone-900"
+                          >
+                            {c}
+                            <button
+                              type="button"
+                              className="rounded-full border border-stone-400 px-2 text-xs text-stone-700 hover:bg-stone-300"
+                              onClick={() => removeCompetitor(c)}
+                              aria-label={`Remove ${c}`}
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {competitors.length === 0 && (
+                      <div className="text-xs text-amber-700">Please add at least one competitor URL.</div>
+                    )}
+                  </div>
 
-                <DialogFooter className="gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => {
-                      setDialogOpen(false);
-                      setEditingProfileId(null);
-                      // optional: clear form
-                      setCompanyName('');
-                      setWebsiteUrl('');
-                      setCompetitors([]);
-                      setTopicsInput('');
-                      setRegion('sg');
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    className="bg-stone-950 text-amber-50 hover:bg-stone-800"
-                    disabled={saving || !canSubmit}
-                  >
-                    {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
-                    {editingProfileId ? 'Save' : 'Create'}
-                  </Button>
-                </DialogFooter>
-              </form>
-            </DialogContent>
-          </Dialog>
+                  <div className="grid gap-3">
+                    <Label htmlFor="topics">Short-tail keywords / topics (comma-separated)</Label>
+                    <Textarea
+                      id="topics"
+                      rows={3}
+                      placeholder="e.g., ai scheduling, meeting assistant, calendar automation"
+                      value={topicsInput}
+                      onChange={(e) => setTopicsInput(e.target.value)}
+                      className="bg-amber-50/60 border-stone-300 text-stone-900 placeholder:text-stone-400"
+                      required
+                    />
+                  </div>
+
+                  {/* NEW: Region selector */}
+                  <div className="grid gap-3">
+                    <Label htmlFor="region">Search region</Label>
+                    <select
+                      id="region"
+                      value={region}
+                      onChange={(e) => setRegion(e.target.value as 'sg' | 'us')}
+                      className="h-10 rounded-md border border-stone-300 bg-amber-50/60 px-3 text-stone-900"
+                    >
+                      <option value="sg">Singapore</option>
+                      <option value="us">United States</option>
+                    </select>
+                  </div>
+
+                  <DialogFooter className="gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        setDialogOpen(false);
+                        setEditingProfileId(null);
+                        // optional: clear form
+                        setCompanyName('');
+                        setWebsiteUrl('');
+                        setCompetitors([]);
+                        setTopicsInput('');
+                        setRegion('sg');
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="submit"
+                      className="bg-stone-950 text-amber-50 hover:bg-stone-800"
+                      disabled={saving || !canSubmit}
+                    >
+                      {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
+                      {editingProfileId ? 'Save' : 'Create'}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
+          </div>
         </header>
 
         {/* Inline banner (success/error/info) */}
