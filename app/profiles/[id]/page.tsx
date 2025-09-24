@@ -251,6 +251,40 @@ function brandMatchesDomain(brand?: string, domain?: string) {
   return b.length > 1 && d.includes(b);
 }
 
+// ====== Lightweight SVG charts (for report) ======
+function StackedBars({
+  rows,
+}: {
+  rows: Array<{ label: string; present: number; competitorOnly: number; white: number }>;
+}) {
+  return (
+    <div className="space-y-3">
+      {rows.map((r) => {
+        const p = Math.max(0, Math.min(1, r.present)) * 100;
+        const c = Math.max(0, Math.min(1, r.competitorOnly)) * 100;
+        const w = Math.max(0, Math.min(1, r.white)) * 100;
+        return (
+          <div key={r.label}>
+            <div className="flex items-center justify-between text-xs text-stone-600 mb-1">
+              <span className="font-medium">{r.label}</span>
+              <span>
+                <span className="mr-2">You {Math.round(p)}%</span>
+                <span className="mr-2">Competitors {Math.round(c)}%</span>
+                <span>White-space {Math.round(w)}%</span>
+              </span>
+            </div>
+            <div className="h-3 w-full rounded bg-stone-200 overflow-hidden flex">
+              <div className="h-3 bg-emerald-500" style={{ width: `${p}%` }} />
+              <div className="h-3 bg-amber-500" style={{ width: `${c}%` }} />
+              <div className="h-3 bg-stone-400" style={{ width: `${w}%` }} />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ===== Volume helpers =====
 type VolumeMonthly = { year: number; month: number; ai_search_volume: number };
 function formatMonth(y: number, m: number) {
@@ -962,8 +996,440 @@ export default function ProfileDashboard() {
                     </div>
                   )
                 ) : (
-                  /* … keep your existing report UI … */
-                  <div />
+                  <Tabs defaultValue="sov" className="w-full">
+                    <TabsList className="mb-4 grid grid-cols-3">
+                      <TabsTrigger value="sov">Share of Voice</TabsTrigger>
+                      <TabsTrigger value="topical">Topical Analysis</TabsTrigger>
+                      <TabsTrigger value="actionables">Actionables</TabsTrigger>
+                    </TabsList>
+
+                    {/* --------- TAB 1: SHARE OF VOICE --------- */}
+                    <TabsContent value="sov" className="space-y-8">
+                      <motion.div className="space-y-8" initial="initial" animate="animate" variants={staggerContainer}>
+                        {/* Executive Snapshot */}
+                        <motion.div variants={fadeIn}>
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                            <Card>
+                              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                                <CardTitle className="text-sm font-medium">Total Prompts</CardTitle>
+                                <BarChart3 className="h-4 w-4 text-stone-500" />
+                              </CardHeader>
+                              <CardContent>
+                                <div className="text-2xl font-bold">{totalPrompts}</div>
+                                <p className="text-xs text-stone-500">Tracked intents</p>
+                              </CardContent>
+                            </Card>
+                            <Card>
+                              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                                <CardTitle className="text-sm font-medium">Share of Voice</CardTitle>
+                                <ArrowUpRight className="h-4 w-4 text-emerald-600" />
+                              </CardHeader>
+                              <CardContent>
+                                <div className="text-2xl font-bold">{sovPct}</div>
+                                <div className="flex items-center">
+                                  <div className="h-2 w-full rounded bg-stone-200 overflow-hidden">
+                                    <div className="h-2 bg-emerald-500" style={{ width: `${sovBar}%` }} />
+                                  </div>
+                                  <span className="ml-2 text-xs text-stone-500">{sovPct}</span>
+                                </div>
+                              </CardContent>
+                            </Card>
+                            <Card>
+                              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                                <CardTitle className="text-sm font-medium">Competitor Pressure</CardTitle>
+                                <Minus className="h-4 w-4 text-amber-600" />
+                              </CardHeader>
+                              <CardContent>
+                                <div className="text-2xl font-bold">{pressurePct}</div>
+                                <p className="text-xs text-stone-500">Avg competitive presence</p>
+                              </CardContent>
+                            </Card>
+                            <Card>
+                              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                                <CardTitle className="text-sm font-medium">White-space</CardTitle>
+                                <ArrowDownRight className="h-4 w-4 text-rose-600" />
+                              </CardHeader>
+                              <CardContent>
+                                <div className="text-2xl font-bold">{whitePct}</div>
+                                <p className="text-xs text-stone-500">No visible players</p>
+                              </CardContent>
+                            </Card>
+                          </div>
+                        </motion.div>
+
+                        {/* SOV by Category */}
+                        <motion.div className="grid grid-cols-1 lg:grid-cols-1 gap-6" variants={fadeIn}>
+                          <Card className="lg:col-span-2">
+                            <CardHeader>
+                              <CardTitle className="text-base">Funnel Share of Voice by Category</CardTitle>
+                              <CardDescription className="text-xs">
+                                You vs competitors vs white-space per prompt intent
+                              </CardDescription>
+                            </CardHeader>
+                            <CardContent>
+                              <StackedBars rows={sovRows} />
+                            </CardContent>
+                          </Card>
+                        </motion.div>
+
+                        {/* Category narrative tiles + weights (improved readability) */}
+                        <motion.div className="grid grid-cols-1 md:grid-cols-2 gap-6" variants={fadeIn}>
+                          {(['brainstorming','identified_problem','solution_comparing','info_seeking'] as PromptCategory[]).map((cat) => {
+                            const sum = overall.categorySummaries[cat] || { presencePct: 0, pressure: 0, topGaps: [] };
+                            const presence = Math.max(0, Math.min(1, sum.presencePct || 0));
+                            const pressure = Math.max(0, Math.min(1, sum.pressure || 0));
+                            const presencePctStr = sovFmt(sum.presencePct);
+                            const pressurePctStr = sovFmt(sum.pressure);
+                            const weight = categoryWeights[cat].weight;
+                            const reason = categoryWeights[cat].reason;
+
+                            return (
+                              <Card key={cat} className="border-stone-200">
+                                <CardHeader className="pb-3">
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div>
+                                      <CardTitle className="capitalize">{cat.replace('_',' ')}</CardTitle>
+                                      <CardDescription className="text-xs">
+                                        Presence {presencePctStr} · Pressure {pressurePctStr}
+                                      </CardDescription>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <Badge className="bg-amber-600 text-amber-50 shadow-sm">
+                                        Weight {weight.toFixed(1)}
+                                      </Badge>
+                                    </div>
+                                  </div>
+                                </CardHeader>
+
+                                <CardContent className="space-y-4">
+                                  {/* Narrative */}
+                                  <p className="text-sm leading-relaxed text-stone-800">
+                                    {overall?.insights?.categoryNarrative?.[cat] || '—'}
+                                  </p>
+
+                                  {/* Presence vs Pressure bars */}
+                                  <div className="space-y-3">
+                                    <div>
+                                      <div className="mb-1 flex items-center justify-between text-xs font-medium text-stone-700">
+                                        <span>Presence</span>
+                                        <span>{presencePctStr}</span>
+                                      </div>
+                                      <div className="h-2 w-full rounded bg-stone-200 overflow-hidden">
+                                        <div
+                                          className="h-2 bg-emerald-500"
+                                          style={{ width: `${Math.round(presence * 100)}%` }}
+                                        />
+                                      </div>
+                                    </div>
+
+                                    <div>
+                                      <div className="mb-1 flex items-center justify-between text-xs font-medium text-stone-700">
+                                        <span>Competitor Pressure</span>
+                                        <span>{pressurePctStr}</span>
+                                      </div>
+                                      <div className="h-2 w-full rounded bg-stone-200 overflow-hidden">
+                                        <div
+                                          className="h-2 bg-amber-500"
+                                          style={{ width: `${Math.round(pressure * 100)}%` }}
+                                        />
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Weight explanation callout */}
+                                  <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50/70 p-3">
+                                    <div className="mb-1 flex items-center justify-between">
+                                      <span className="text-xs font-semibold uppercase tracking-wide text-amber-700">
+                                        Why this weight
+                                      </span>
+                                      <Badge className="bg-amber-100 text-amber-800 border-amber-200 border">
+                                        {weight.toFixed(1)}
+                                      </Badge>
+                                    </div>
+                                    <p className="text-xs leading-relaxed text-amber-800">
+                                      {reason}
+                                    </p>
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            );
+                          })}
+                        </motion.div>
+
+                      </motion.div>
+                    </TabsContent>
+
+                    {/* --------- TAB 2: TOPICAL ANALYSIS --------- */}
+                    <TabsContent value="topical" className="space-y-8">
+                      <motion.div className="space-y-8" initial="initial" animate="animate" variants={staggerContainer}>
+                        {/* Insights */}
+                        <motion.div className="grid grid-cols-1 lg:grid-cols-3 gap-6" variants={fadeIn}>
+                          <Card className="border-l-4 border-l-emerald-500 lg:col-span-1">
+                            <CardHeader>
+                              <div className="flex items-center space-x-2">
+                                <ArrowUpRight className="h-5 w-5 text-emerald-500" />
+                                <CardTitle>Strengths</CardTitle>
+                              </div>
+                            </CardHeader>
+                            <CardContent className="space-y-2">
+                              {overall?.insights?.strengths?.length
+                                ? overall.insights?.strengths?.map((s, i) => (
+                                    <div key={i} className="text-sm text-stone-800">• {s}</div>
+                                  ))
+                                : <div className="text-sm text-stone-500">No items.</div>}
+                            </CardContent>
+                          </Card>
+
+                          <Card className="border-l-4 border-l-rose-500 lg:col-span-1">
+                            <CardHeader>
+                              <div className="flex items-center space-x-2">
+                                <ArrowDownRight className="h-5 w-5 text-rose-500" />
+                                <CardTitle>Weaknesses</CardTitle>
+                              </div>
+                            </CardHeader>
+                            <CardContent className="space-y-2">
+                              {overall?.insights?.weaknesses?.length
+                                ? overall.insights?.weaknesses?.map((w, i) => (
+                                    <div key={i} className="text-sm text-stone-800">• {w}</div>
+                                  ))
+                                : <div className="text-sm text-stone-500">No items.</div>}
+                            </CardContent>
+                          </Card>
+
+                          <Card className="lg:col-span-1">
+                            <CardHeader>
+                              <div className="flex items-center space-x-2">
+                                <Info className="h-5 w-5 text-stone-500" />
+                                <CardTitle>Competitive Context</CardTitle>
+                              </div>
+                              <CardDescription className="text-xs">
+                                Narrative summary of who’s shaping AI answers
+                              </CardDescription>
+                            </CardHeader>
+                            <CardContent className="space-y-2">
+                              <p className="text-sm text-stone-700">
+                                {overall?.insights?.competitiveNarrative || '—'}
+                              </p>
+                            </CardContent>
+                          </Card>
+                        </motion.div>
+
+                        {/* Cluster Cards */}
+                        <motion.div className="space-y-4" variants={fadeIn}>
+                          <div className="grid grid-cols-1  gap-6">
+                            {overall.clusters?.map((cluster, idx) => {
+                              const badgeClass =
+                                cluster.opportunitySum >= 6
+                                  ? "bg-rose-100 text-rose-800"
+                                  : cluster.opportunitySum >= 3
+                                    ? "bg-amber-100 text-amber-800"
+                                    : "bg-emerald-100 text-emerald-800";
+                              const badgeLabel =
+                                cluster.opportunitySum >= 6 ? "High Opportunity"
+                                  : cluster.opportunitySum >= 3 ? "Medium Opportunity"
+                                  : "Low Opportunity";
+
+                              return (
+                                <motion.div
+                                  key={cluster.title + idx}
+                                  initial={{ opacity: 0, y: 20 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  transition={{ delay: idx * 0.05 }}
+                                >
+                                  <Card className="h-full hover:shadow-sm transition-shadow">
+                                    <CardHeader className="pb-2">
+                                      <div className="flex items-center justify-between">
+                                        <div className="flex items-center space-x-2">
+                                          <div className="p-1.5 rounded-full bg-stone-100">{iconFor(cluster.icon)}</div>
+                                          <CardTitle className="text-base">{cluster.title}</CardTitle>
+                                        </div>
+                                        <Badge className={badgeClass}>{badgeLabel}</Badge>
+                                      </div>
+                                    </CardHeader>
+                                    <CardContent className="space-y-2">
+                                      {(cluster.items || []).map((pid) => {
+                                        const text = promptsMap.get(pid)?.text ?? pid;
+                                        const opp = (overall.opportunities || []).find(o => o.promptId === pid);
+                                        return (
+                                          <div
+                                            key={pid}
+                                            className="flex justify-between items-center text-sm py-1 border-b border-stone-100 last:border-0"
+                                          >
+                                            <span className="truncate mr-2">{text}</span>
+                                            <div className="flex items-center gap-2">
+                                              {opp ? (
+                                                <>
+                                                  <Badge className={opp.channels.chatgpt ? "bg-emerald-100 text-emerald-800" : "bg-stone-100 text-stone-500"}>ChatGPT</Badge>
+                                                  <Badge className={opp.channels.perplexity ? "bg-emerald-100 text-emerald-800" : "bg-stone-100 text-stone-500"}>Perplexity</Badge>
+                                                  <Badge className={opp.channels.googleAIO ? "bg-emerald-100 text-emerald-800" : "bg-stone-100 text-stone-500"}>Google AIO</Badge>
+                                                </>
+                                              ) : (
+                                                <Badge className="bg-stone-100 text-stone-800">—</Badge>
+                                              )}
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                    </CardContent>
+                                  </Card>
+                                </motion.div>
+                              );
+                            })}
+                          </div>
+                        </motion.div>
+                      </motion.div>
+                    </TabsContent>
+
+                    {/* --------- TAB 3: ACTIONABLES --------- */}
+                    <TabsContent value="actionables" className="space-y-6">
+                      {!overall ? (
+                        <div className="text-stone-600 text-sm">
+                          Generate the report to view prioritized actions.
+                        </div>
+                      ) : (
+                        <motion.div className="space-y-6" initial="initial" animate="animate" variants={staggerContainer}>
+                          <motion.div variants={fadeIn}>
+                            <div className="flex items-center justify-between">
+                              <h3 className="text-base font-semibold text-stone-900">Next 10 Actions</h3>
+                              <Badge className="bg-stone-200 text-stone-800">
+                                Ranked by opportunity
+                              </Badge>
+                            </div>
+                            <p className="text-xs text-stone-600 mt-1">
+                              Each action shows the score breakdown and a concrete <span className="font-medium">blog outline</span> to ship content LLMs can cite.
+                            </p>
+                          </motion.div>
+
+                          {(overall as any).nextActions?.map((item: any) => (
+                            <motion.div key={item.promptId} variants={fadeIn}>
+                              <Card className="overflow-hidden">
+                                <CardHeader className="bg-stone-50">
+                                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                                    <div className="min-w-0">
+                                      <div className="flex items-center gap-2 mb-1">
+                                        <Badge className="bg-stone-900 text-amber-50">{String(item.rank).padStart(2, "0")}</Badge>
+                                        <Badge className="capitalize bg-stone-200 text-stone-900">
+                                          {item.category?.replace('_', ' ') || '—'}
+                                        </Badge>
+                                        <Badge className="bg-stone-100 text-stone-800">
+                                          {item.recommendedArtifactType?.replace('_', ' ') || 'blog post'}
+                                        </Badge>
+                                      </div>
+                                      {/* Full prompt, multi-line */}
+                                      <CardTitle className="text-base break-words whitespace-pre-wrap">
+                                        {item.prompt}
+                                      </CardTitle>
+                                    </div>
+
+                                    {/* Score & channels */}
+                                    <div className="flex-shrink-0 space-y-2">
+                                      <div className="flex items-center justify-end gap-2">
+                                        <span className="text-xs text-stone-500">Opportunity</span>
+                                        <Badge className="bg-amber-100 text-amber-800">
+                                          {Number(item.opportunityScore).toFixed(2)}
+                                        </Badge>
+                                      </div>
+
+                                      {/* Score bars: Missing Presence, Pressure, Weight */}
+                                      <div className="w-64">
+                                        <div className="mb-1 flex items-center justify-between text-[10px] text-stone-600">
+                                          <span>Missing presence</span>
+                                          <span>{Number(item.scoreBreakdown?.missingPresence ?? 0).toFixed(2)}</span>
+                                        </div>
+                                        <div className="h-2 rounded bg-stone-200 overflow-hidden mb-2">
+                                          <div className="h-2 bg-rose-400" style={{ width: `${Math.min(1, (item.scoreBreakdown?.missingPresence ?? 0) / 2) * 100}%` }} />
+                                        </div>
+
+                                        <div className="mb-1 flex items-center justify-between text-[10px] text-stone-600">
+                                          <span>Competitor pressure</span>
+                                          <span>{Number(item.scoreBreakdown?.competitorPressure ?? 0).toFixed(2)}</span>
+                                        </div>
+                                        <div className="h-2 rounded bg-stone-200 overflow-hidden mb-2">
+                                          <div className="h-2 bg-amber-400" style={{ width: `${Math.min(1, item.scoreBreakdown?.competitorPressure ?? 0) * 100}%` }} />
+                                        </div>
+
+                                        <div className="mb-1 flex items-center justify-between text-[10px] text-stone-600">
+                                          <span>Category weight</span>
+                                          <span>{Number(item.scoreBreakdown?.categoryWeight ?? 0).toFixed(1)}</span>
+                                        </div>
+                                        <div className="h-2 rounded bg-stone-200 overflow-hidden">
+                                          <div className="h-2 bg-emerald-500" style={{ width: `${Math.min(1, (item.scoreBreakdown?.categoryWeight ?? 0) / 1.7) * 100}%` }} />
+                                        </div>
+
+                                        <div className="mt-2 text-[10px] text-stone-500">
+                                          <span className="font-medium">Formula:</span> {item.scoreBreakdown?.formula || "missing × (1 + 0.6×pressure) × weight"}
+                                        </div>
+                                        <div className="mt-1 text-[10px] text-stone-500">
+                                          <span className="font-medium">Why this weight:</span> {item.scoreBreakdown?.categoryWeightReason || "—"}
+                                        </div>
+                                      </div>
+
+                                      {/* Channels */}
+                                      <div className="flex items-center justify-end gap-2 pt-2">
+                                        <Badge className={item.channels?.chatgpt ? "bg-emerald-100 text-emerald-800" : "bg-stone-100 text-stone-500"}>ChatGPT</Badge>
+                                        <Badge className={item.channels?.perplexity ? "bg-emerald-100 text-emerald-800" : "bg-stone-100 text-stone-500"}>Perplexity</Badge>
+                                        <Badge className={item.channels?.googleAIO ? "bg-emerald-100 text-emerald-800" : "bg-stone-100 text-stone-500"}>Google AIO</Badge>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </CardHeader>
+
+                                <CardContent className="p-6">
+                                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                    {/* Why / rationale */}
+                                    <div className="space-y-3">
+                                      <h4 className="text-sm font-medium">Why this matters</h4>
+                                      <ul className="list-disc pl-5 text-sm text-stone-700 space-y-1">
+                                        {(item.why || []).map((w: string, i: number) => (
+                                          <li key={i}>{w}</li>
+                                        ))}
+                                      </ul>
+
+                                     
+                                    </div>
+
+                                    {/* Outline – numbered steps (BLOG) */}
+                                    <div className="lg:col-span-2">
+                                      <h4 className="text-sm font-medium mb-2">Blog outline to ship</h4>
+                                      <div className="rounded border border-stone-200">
+                                        <div className="bg-stone-50 px-3 py-2 text-xs text-stone-600 flex items-center justify-between">
+                                          <span>Recommended format: {item.recommendedArtifactType?.replace('_',' ') || 'blog post'}</span>
+                                        </div>
+                                        <div className="max-h-64 overflow-y-auto p-4">
+                                          {/* Steps */}
+                                          <ol className="list-decimal pl-5 text-sm text-stone-800 space-y-2">
+                                            {(item.outlineSteps || []).map((s: string, i: number) => (
+                                              <li key={i}>{s}</li>
+                                            ))}
+                                          </ol>
+
+                                          {/* Structured sections (optional) */}
+                                          {Array.isArray(item.outlineSections) && item.outlineSections.length > 0 && (
+                                            <div className="mt-4 space-y-3">
+                                              {item.outlineSections.map((sec: any, i: number) => (
+                                                <div key={i}>
+                                                  <div className="text-xs font-semibold text-stone-700">{sec.heading}</div>
+                                                  {Array.isArray(sec.bullets) && sec.bullets.length > 0 ? (
+                                                    <ul className="list-disc pl-5 text-xs text-stone-600">
+                                                      {sec.bullets.map((b: string, j: number) => <li key={j}>{b}</li>)}
+                                                    </ul>
+                                                  ) : null}
+                                                </div>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            </motion.div>
+                          ))}
+                        </motion.div>
+                      )}
+                    </TabsContent>
+                  </Tabs>
                 )}
               </TabsContent>
             </Tabs>
