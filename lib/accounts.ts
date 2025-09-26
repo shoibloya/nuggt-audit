@@ -5,5 +5,6 @@ export const accounts: Record<string, string> = {
   purpleclick: 'v9Q3mT7aL2',
   click2view: 'K4n8B2xR0p',
   impossible: 'I4m8A2xS1q',
+  mediaone: 'M4a9A2xS0q',
   nuggt: 'nuggt',
 };
