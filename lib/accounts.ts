@@ -7,4 +7,5 @@ export const accounts: Record<string, string> = {
   impossible: 'I4m8A2xS1q',
   mediaone: 'M4a9A2xS0q',
   nuggt: 'nuggt',
+  hannah: 'nuggt123',
 };
