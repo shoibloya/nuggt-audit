@@ -6,8 +6,14 @@ import { scrapePage, scrapeSite } from "./_helpers";
 export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
+  // Hoist so we can use in the outer catch
+  let url: string | undefined;
+  let blogUrl: string | undefined;
+  let mode: string | undefined;
+  let onlyMarkdown: boolean | undefined;
+
   try {
-    const { url, blogUrl, mode, onlyMarkdown } = await req.json();
+    ({ url, blogUrl, mode, onlyMarkdown } = await req.json());
 
     if (!url || typeof url !== "string") {
       return NextResponse.json({ success: false, error: "Missing URL" }, { status: 400 });
@@ -45,6 +51,21 @@ export async function POST(req: NextRequest) {
     }
   } catch (err: any) {
     console.error("Scrape error:", err);
+
+    // If we have enough context, return SAME-SHAPE success with fallback text
+    if (url) {
+      const fallback = `Please use your own knowledge about the page ${url}`;
+      const isPage = onlyMarkdown || mode === "page" || !blogUrl;
+      if (isPage) {
+        return NextResponse.json({ success: true, data: { markdown: fallback } });
+      }
+      return NextResponse.json({
+        success: true,
+        data: { productMarkdown: fallback, blogTitles: [] },
+      });
+    }
+
+    // If we couldn't even parse the request body, keep the 500
     return NextResponse.json(
       { success: false, error: err?.message ?? "Internal error" },
       { status: 500 }
