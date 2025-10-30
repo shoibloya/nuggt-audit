@@ -32,7 +32,10 @@ export async function POST(
   const profileRef = ref(db, `profiles/${id}`);
 
   try {
-    if (!process.env.FIRECRAWL_API_KEY) throw new Error("FIRECRAWL_API_KEY is not set");
+    // Don't hard-fail if the API key is missing; we'll fall back gracefully below.
+    if (!process.env.FIRECRAWL_API_KEY) {
+      console.warn("FIRECRAWL_API_KEY is not set — proceeding with fallback content.");
+    }
 
     // Load profile
     const snap = await get(profileRef);
@@ -44,16 +47,26 @@ export async function POST(
     // Mark scraping
     await update(profileRef, { status: "scraping", progress: 25, updatedAt: serverTimestamp() });
 
-    // SCRAPE (single page)
-    const doc: any = await firecrawl.scrape(profile.websiteUrl, { formats: ["markdown", "html"] });
-    const markdown: string = doc?.markdown ?? doc?.data?.markdown ?? "";
-    const html: string | undefined = doc?.html ?? doc?.data?.html;
+    // SCRAPE (single page) with graceful fallback if it fails
+    let doc: any = null;
+    let markdown = "";
+    let html: string | undefined = undefined;
 
-    // Log full markdown to server console
+    try {
+      doc = await firecrawl.scrape(profile.websiteUrl, { formats: ["markdown", "html"] });
+      markdown = doc?.markdown ?? doc?.data?.markdown ?? "";
+      html = doc?.html ?? doc?.data?.html;
+    } catch (scrapeErr) {
+      console.warn(`Firecrawl SCRAPE failed for ${profile.websiteUrl}:`, scrapeErr);
+      markdown = `Please use what you know about ${profile.websiteUrl} from your training data.`;
+      html = undefined;
+    }
+
+    // Log full markdown to server console (fallback or real)
     console.log(`──── Firecrawl SCRAPE for ${profile.websiteUrl} ────\n`);
     console.log(markdown);
 
-    // Save preview
+    // Save preview (works for both real scrape and fallback)
     await update(profileRef, {
       scrape: {
         url: profile.websiteUrl,
