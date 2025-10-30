@@ -67,14 +67,19 @@ export async function POST(
     console.log(markdown);
 
     // Save preview (works for both real scrape and fallback)
+    const scrapeData: any = {
+      url: profile.websiteUrl,
+      markdownPreview: markdown.slice(0, 10000),
+      markdownBytes: Buffer.byteLength(markdown, "utf8"),
+      scrapedAt: Date.now(),
+    };
+    // Only include htmlPreview if present; never write undefined to RTDB
+    if (html) {
+      scrapeData.htmlPreview = String(html).slice(0, 5000);
+    }
+
     await update(profileRef, {
-      scrape: {
-        url: profile.websiteUrl,
-        markdownPreview: markdown.slice(0, 10000),
-        markdownBytes: Buffer.byteLength(markdown, "utf8"),
-        htmlPreview: html ? String(html).slice(0, 5000) : undefined,
-        scrapedAt: Date.now(),
-      },
+      scrape: scrapeData,
       progress: 45,
       updatedAt: serverTimestamp(),
     });
