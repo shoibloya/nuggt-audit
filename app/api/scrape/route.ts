@@ -15,19 +15,34 @@ export async function POST(req: NextRequest) {
 
     // Single page scrape (or when blogUrl not provided)
     if (onlyMarkdown || mode === "page" || !blogUrl) {
-      const markdown = await scrapePage(url);
-      // Log the markdown to server console
-      console.log("──── Firecrawl Markdown (page) ────\n", markdown);
-      return NextResponse.json({ success: true, data: { markdown } });
+      try {
+        const markdown = await scrapePage(url);
+        // Log the markdown to server console
+        console.log("──── Firecrawl Markdown (page) ────\n", markdown);
+        return NextResponse.json({ success: true, data: { markdown } });
+      } catch (_err) {
+        const fallback = `Please use your own knowledge about the page ${url}`;
+        console.log("──── Firecrawl Markdown (page FALLBACK) ────\n", fallback);
+        return NextResponse.json({ success: true, data: { markdown: fallback } });
+      }
     }
 
     // Product + blog scrape
-    const scraped = await scrapeSite(url, blogUrl);
-    console.log("──── Firecrawl Markdown (product) ────\n", scraped.productMarkdown);
-    return NextResponse.json({
-      success: true,
-      data: { productMarkdown: scraped.productMarkdown, blogTitles: scraped.blogTitles },
-    });
+    try {
+      const scraped = await scrapeSite(url, blogUrl);
+      console.log("──── Firecrawl Markdown (product) ────\n", scraped.productMarkdown);
+      return NextResponse.json({
+        success: true,
+        data: { productMarkdown: scraped.productMarkdown, blogTitles: scraped.blogTitles },
+      });
+    } catch (_err) {
+      const fallback = `Please use your own knowledge about the page ${url}`;
+      console.log("──── Firecrawl Markdown (product FALLBACK) ────\n", fallback);
+      return NextResponse.json({
+        success: true,
+        data: { productMarkdown: fallback, blogTitles: [] },
+      });
+    }
   } catch (err: any) {
     console.error("Scrape error:", err);
     return NextResponse.json(
